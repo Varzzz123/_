@@ -1,0 +1,19 @@
+{
+  "name": "wa-bot-baileys",
+  "version": "1.0.0",
+  "description": "WhatsApp Bot menggunakan @whiskeysockets/baileys dengan Pairing Code",
+  "main": "index.js",
+  "scripts": {
+    "start": "node main.js",
+    "dev": "nodemon index.js"
+  },
+  "dependencies": {
+    "@hapi/boom": "^10.0.1",
+    "@whiskeysockets/baileys": "^6.7.16",
+    "jimp": "^1.6.1",
+    "pino": "^8.21.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.0"
+  }
+}
