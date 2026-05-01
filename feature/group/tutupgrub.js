@@ -7,11 +7,10 @@ async function handleTutupGrub(ctx) {
 
     if (!isGroup) return;
 
-    const p       = cfg.PREFIX;
-    const isAdmin = await isGroupAdmin(sock, from, sender);
-
+    const p = cfg.PREFIX;
     if (command !== `${p}tutupgrub` && command !== `${p}bukagrub`) return;
 
+    const isAdmin = await isGroupAdmin(sock, from, sender);
     if (!isAdmin) return reply("❌ Hanya admin yang bisa menggunakan perintah ini.");
 
     const botAdmin = await isBotAdmin(sock, from);
@@ -22,10 +21,8 @@ async function handleTutupGrub(ctx) {
         return reply("🔒 Grup ditutup! Hanya admin yang bisa mengirim pesan.");
     }
 
-    if (command === `${p}bukagrub`) {
-        await sock.groupSettingUpdate(from, "not_announcement");
-        return reply("🔓 Grup dibuka! Semua anggota bisa mengirim pesan.");
-    }
+    await sock.groupSettingUpdate(from, "not_announcement");
+    return reply("🔓 Grup dibuka! Semua anggota bisa mengirim pesan.");
 }
 
 module.exports = { handleTutupGrub };

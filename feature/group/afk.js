@@ -7,7 +7,6 @@ const DB_PATH = path.join(__dirname, "../../data/afk.json");
 function loadDB() {
     try { return JSON.parse(fs.readFileSync(DB_PATH, "utf-8")); } catch { return {}; }
 }
-
 function saveDB(db) {
     fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
     fs.writeFileSync(DB_PATH, JSON.stringify(db, null, 2));
@@ -28,21 +27,19 @@ async function handleAfk(ctx) {
 
     if (!isGroup) return;
 
-    const db = loadDB();
-    const p  = cfg.PREFIX;
-
+    const db            = loadDB();
     const mentionedJids = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
 
-    if (command === `${p}afk`) {
-        const alasan  = text || "Tidak ada alasan";
-        db[sender]    = { alasan, since: Date.now(), name: senderName };
+    if (command === `${cfg.PREFIX}afk`) {
+        const alasan = text || "Tidak ada alasan";
+        db[sender]   = { alasan, since: Date.now(), name: senderName };
         saveDB(db);
         return reply(`😴 *${senderName}* sekarang AFK\n📝 Alasan: ${alasan}`);
     }
 
     if (db[sender]) {
-        const afkData = db[sender];
-        const durasi  = formatDuration(Date.now() - afkData.since);
+        const data   = db[sender];
+        const durasi = formatDuration(Date.now() - data.since);
         delete db[sender];
         saveDB(db);
         await sock.sendMessage(from, {
@@ -52,12 +49,12 @@ async function handleAfk(ctx) {
 
     for (const jid of mentionedJids) {
         if (db[jid]) {
-            const afkData = db[jid];
-            const durasi  = formatDuration(Date.now() - afkData.since);
+            const data   = db[jid];
+            const durasi = formatDuration(Date.now() - data.since);
             await reply(
-                `😴 *${afkData.name}* sedang AFK\n` +
-                `📝 Alasan: ${afkData.alasan}\n` +
-                `⏱ Sudah AFK selama: ${durasi}`
+                `😴 *${data.name}* sedang AFK\n` +
+                `📝 Alasan: ${data.alasan}\n` +
+                `⏱ Sudah: ${durasi}`
             );
         }
     }

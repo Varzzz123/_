@@ -14,40 +14,38 @@ function normalizeNomor(raw) {
 function formatHelp() {
     return (
         `❌ *Format salah!*\n\n` +
-        `Gunakan:\n` +
-        `*${cfg.PREFIX}menfess [nomor] [pesan]*\n\n` +
+        `Gunakan:\n*${cfg.PREFIX}menfess [nomor] [pesan]*\n\n` +
         `Contoh:\n` +
         `${cfg.PREFIX}menfess 628123456789 Hei aku suka kamu 😳\n` +
         `${cfg.PREFIX}menfess 08123456789 Halo apa kabar?`
     );
 }
 
-function buildPesan(teks, timestamp) {
+function buildPesan(teks, ts) {
     return (
         `╔══════════════════════╗\n` +
         `║   📨 *MENFESS*       ║\n` +
         `╚══════════════════════╝\n\n` +
         `${teks}\n\n` +
         `──────────────────────\n` +
-        `🕐 ${timestamp}\n` +
-        `👤 _Anonim_\n\n` +
+        `🕐 ${ts}\n👤 _Anonim_\n\n` +
         `_Reply pesan ini untuk membalas secara anonim._`
     );
 }
 
-function buildBalasan(teks, timestamp) {
+function buildBalasan(teks, ts) {
     return (
         `╔══════════════════════╗\n` +
         `║   💬 *BALASAN*       ║\n` +
         `╚══════════════════════╝\n\n` +
         `${teks}\n\n` +
         `──────────────────────\n` +
-        `🕐 ${timestamp}\n` +
-        `👤 _Anonim_`
+        `🕐 ${ts}\n👤 _Anonim_\n\n` +
+        `_Reply pesan ini untuk membalas secara anonim._`
     );
 }
 
-function timestamp() {
+function getTs() {
     return new Date().toLocaleString("id-ID", { timeZone: "Asia/Jakarta", hour12: false });
 }
 
@@ -59,25 +57,26 @@ async function handleMenfess(ctx) {
     const isReply   = !!quotedCtx?.quotedMessage;
 
     if (isReply) {
-        const quotedId  = quotedCtx.stanzaId;
-        const session   = sessions.get(quotedId);
+        const quotedId = quotedCtx.stanzaId;
+        const session  = sessions.get(quotedId);
 
         if (session) {
             const rawText = getRawText(msg).trim();
             if (!rawText) return;
 
-            const ts      = timestamp();
+            const ts      = getTs();
             const balasan = buildBalasan(rawText, ts);
 
             try {
-                await sock.sendMessage(session.targetJid, { text: balasan });
-                await reply("✅ Balasan anonim berhasil dikirim!");
-
                 const sentMsg = await sock.sendMessage(session.targetJid, { text: balasan });
                 const newId   = sentMsg?.key?.id;
+
                 if (newId) {
                     sessions.set(newId, { targetJid: from });
+                    setTimeout(() => sessions.delete(newId), 24 * 60 * 60 * 1000);
                 }
+
+                await reply("✅ Balasan anonim berhasil dikirim!");
             } catch {
                 await reply("❌ Gagal mengirim balasan.");
             }
@@ -99,14 +98,10 @@ async function handleMenfess(ctx) {
     const pesan       = afterCmd.slice(firstSpace + 1).trim();
     const nomorBersih = normalizeNomor(nomorRaw);
 
-    if (!pesan || nomorBersih.length < 10 || nomorBersih.length > 15) {
-        return reply(formatHelp());
-    }
+    if (!pesan || nomorBersih.length < 10 || nomorBersih.length > 15) return reply(formatHelp());
 
     const botJid = (sock.user?.id || "").split(":")[0].split("@")[0];
-    if (botJid && nomorBersih === botJid) {
-        return reply("❌ Tidak bisa kirim menfess ke bot sendiri.");
-    }
+    if (botJid && nomorBersih === botJid) return reply("❌ Tidak bisa kirim menfess ke bot sendiri.");
 
     try {
         const result = await Promise.race([
@@ -120,7 +115,7 @@ async function handleMenfess(ctx) {
     }
 
     const targetJid = `${nomorBersih}@s.whatsapp.net`;
-    const ts        = timestamp();
+    const ts        = getTs();
     const pesanFull = buildPesan(pesan, ts);
 
     try {
@@ -132,7 +127,7 @@ async function handleMenfess(ctx) {
             setTimeout(() => sessions.delete(msgId), 24 * 60 * 60 * 1000);
         }
 
-        await reply(`✅ Menfess berhasil dikirim ke *${nomorBersih}* secara anonim!`);
+        await reply(`✅ Menfess terkirim ke *${nomorBersih}* secara anonim!`);
     } catch {
         await reply(`❌ Gagal mengirim ke *${nomorBersih}*. Coba lagi nanti.`);
     }
