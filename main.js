@@ -11,10 +11,19 @@ const pino       = require("pino");
 const readline   = require("readline");
 
 const { BOT_NAME } = require("./config");
-const { handleGeneral } = require("./feature/general");
-const { handleMenfess } = require("./feature/menfess");
-const { handleSticker } = require("./feature/sticker");
-const { handleStext }   = require("./feature/tstiker");
+
+const { handleGeneral }    = require("./feature/general");
+const { handleMenfess }    = require("./feature/menfess");
+const { handleSticker }    = require("./feature/sticker");
+const { handleStext }      = require("./feature/tstiker");
+const { handleYoutube }    = require("./feature/media/youtube");
+const { handleTiktok }     = require("./feature/media/tiktok");
+const { handleGames }      = require("./feature/games/index");
+const { handleAntilink }   = require("./feature/group/antilink");
+const { handleAntispam }   = require("./feature/group/antispam");
+const { handleAntivirtex } = require("./feature/group/antivirtex");
+const { handleAfk }        = require("./feature/group/afk");
+const { handleTutupGrub }  = require("./feature/group/tutupgrub");
 
 const logger   = pino({ level: "silent" });
 const rl       = readline.createInterface({ input: process.stdin, output: process.stdout });
@@ -61,25 +70,21 @@ async function startBot() {
             });
 
             console.log("\n📷 Scan QR Code di atas dengan WhatsApp kamu.\n");
-
             qrSock.ev.on("creds.update", saveCreds);
             qrSock.ev.on("connection.update", ({ connection, lastDisconnect }) => {
                 if (connection === "open") {
                     console.log(`✅ ${BOT_NAME} terhubung via QR Code!`);
                     qrSock.ev.removeAllListeners();
-                    startBot();
+                    setTimeout(() => startBot().catch(console.error), 2000);
                 } else if (connection === "close") {
                     const reason = new Boom(lastDisconnect?.error)?.output?.statusCode;
-                    if (reason === DisconnectReason.loggedOut) {
-                        console.log("🚪 Logged out.");
-                    }
+                    if (reason === DisconnectReason.loggedOut) console.log("🚪 Logged out.");
                 }
             });
             return;
 
         } else if (pilihan === "2") {
             await new Promise((r) => setTimeout(r, 3000));
-
             let phoneNumber = await question("Masukkan nomor WA (628xxx): ");
             phoneNumber = phoneNumber.trim().replace(/[^0-9]/g, "");
 
@@ -99,10 +104,11 @@ async function startBot() {
 
     sock.ev.on("connection.update", ({ connection, lastDisconnect }) => {
         if (connection === "close") {
-            const reason = new Boom(lastDisconnect?.error)?.output?.statusCode;
+            const reason          = new Boom(lastDisconnect?.error)?.output?.statusCode;
+            const shouldReconnect = reason !== DisconnectReason.loggedOut;
             console.log("❌ Terputus, kode:", reason);
-            if (reason !== DisconnectReason.loggedOut) {
-                startBot();
+            if (shouldReconnect) {
+                setTimeout(() => startBot().catch(console.error), 3000);
             } else {
                 console.log("🚪 Logged out. Hapus auth_info lalu jalankan ulang.");
             }
@@ -121,10 +127,18 @@ async function startBot() {
 
             const ctx = buildContext(msg, sock);
 
-            await handleGeneral(ctx);
             await handleMenfess(ctx);
+            await handleGeneral(ctx);
             await handleSticker(ctx);
             await handleStext(ctx);
+            await handleYoutube(ctx);
+            await handleTiktok(ctx);
+            await handleGames(ctx);
+            await handleAntilink(ctx);
+            await handleAntispam(ctx);
+            await handleAntivirtex(ctx);
+            await handleAfk(ctx);
+            await handleTutupGrub(ctx);
         }
     });
 

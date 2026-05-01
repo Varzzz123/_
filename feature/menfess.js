@@ -1,4 +1,7 @@
 const cfg = require("../config");
+const { getRawText } = require("../lib/helper");
+
+const sessions = new Map();
 
 function normalizeNomor(raw) {
     if (!raw) return "";
@@ -8,51 +11,96 @@ function normalizeNomor(raw) {
     return n.replace(/\D/g, "");
 }
 
-function getRawText(msg) {
-    const m = msg?.message || {};
-    return (
-        m.conversation              ||
-        m.extendedTextMessage?.text ||
-        m.imageMessage?.caption     ||
-        m.videoMessage?.caption     ||
-        ""
-    );
-}
-
 function formatHelp() {
     return (
         `❌ *Format salah!*\n\n` +
         `Gunakan:\n` +
         `*${cfg.PREFIX}menfess [nomor] [pesan]*\n\n` +
         `Contoh:\n` +
-        `${cfg.PREFIX}menfess 628123456789 Hei, aku suka sama kamu 😳\n` +
+        `${cfg.PREFIX}menfess 628123456789 Hei aku suka kamu 😳\n` +
         `${cfg.PREFIX}menfess 08123456789 Halo apa kabar?`
     );
 }
 
+function buildPesan(teks, timestamp) {
+    return (
+        `╔══════════════════════╗\n` +
+        `║   📨 *MENFESS*       ║\n` +
+        `╚══════════════════════╝\n\n` +
+        `${teks}\n\n` +
+        `──────────────────────\n` +
+        `🕐 ${timestamp}\n` +
+        `👤 _Anonim_\n\n` +
+        `_Reply pesan ini untuk membalas secara anonim._`
+    );
+}
+
+function buildBalasan(teks, timestamp) {
+    return (
+        `╔══════════════════════╗\n` +
+        `║   💬 *BALASAN*       ║\n` +
+        `╚══════════════════════╝\n\n` +
+        `${teks}\n\n` +
+        `──────────────────────\n` +
+        `🕐 ${timestamp}\n` +
+        `👤 _Anonim_`
+    );
+}
+
+function timestamp() {
+    return new Date().toLocaleString("id-ID", { timeZone: "Asia/Jakarta", hour12: false });
+}
+
 async function handleMenfess(ctx) {
-    const { sock, msg, from, command } = ctx;
+    const { sock, msg, from, sender, command } = ctx;
     const reply = (t) => sock.sendMessage(from, { text: t }, { quoted: msg });
+
+    const quotedCtx = msg.message?.extendedTextMessage?.contextInfo;
+    const isReply   = !!quotedCtx?.quotedMessage;
+
+    if (isReply) {
+        const quotedId  = quotedCtx.stanzaId;
+        const session   = sessions.get(quotedId);
+
+        if (session) {
+            const rawText = getRawText(msg).trim();
+            if (!rawText) return;
+
+            const ts      = timestamp();
+            const balasan = buildBalasan(rawText, ts);
+
+            try {
+                await sock.sendMessage(session.targetJid, { text: balasan });
+                await reply("✅ Balasan anonim berhasil dikirim!");
+
+                const sentMsg = await sock.sendMessage(session.targetJid, { text: balasan });
+                const newId   = sentMsg?.key?.id;
+                if (newId) {
+                    sessions.set(newId, { targetJid: from });
+                }
+            } catch {
+                await reply("❌ Gagal mengirim balasan.");
+            }
+            return;
+        }
+    }
 
     if (command !== `${cfg.PREFIX}menfess`) return;
 
     const rawText  = getRawText(msg).trim();
-    const afterCmd = rawText.replace(new RegExp(`^\\${cfg.PREFIX}menfess\\s+`, "i"), "");
+    const afterCmd = rawText.replace(new RegExp(`^\\${cfg.PREFIX}menfess\\s+`, "i"), "").trim();
 
-    if (!afterCmd || afterCmd === `${cfg.PREFIX}menfess`) return reply(formatHelp());
+    if (!afterCmd) return reply(formatHelp());
 
     const firstSpace = afterCmd.search(/\s+/);
     if (firstSpace === -1) return reply(formatHelp());
 
-    const nomorRaw   = afterCmd.slice(0, firstSpace);
-    const pesan      = afterCmd.slice(firstSpace + 1).trim();
-
-    if (!nomorRaw || !pesan) return reply(formatHelp());
-
+    const nomorRaw    = afterCmd.slice(0, firstSpace);
+    const pesan       = afterCmd.slice(firstSpace + 1).trim();
     const nomorBersih = normalizeNomor(nomorRaw);
 
-    if (nomorBersih.length < 10 || nomorBersih.length > 15) {
-        return reply(`❌ Nomor *${nomorRaw}* tidak valid.\nGunakan format: \`628123456789\``);
+    if (!pesan || nomorBersih.length < 10 || nomorBersih.length > 15) {
+        return reply(formatHelp());
     }
 
     const botJid = (sock.user?.id || "").split(":")[0].split("@")[0];
@@ -63,39 +111,30 @@ async function handleMenfess(ctx) {
     try {
         const result = await Promise.race([
             sock.onWhatsApp(nomorBersih),
-            new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), 5000)),
+            new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), 5000)),
         ]);
-
         const exists = Array.isArray(result) ? !!result[0]?.exists : !!result?.exists;
         if (!exists) return reply(`❌ Nomor *${nomorBersih}* tidak terdaftar di WhatsApp.`);
-
     } catch (err) {
-        if (err.message !== "timeout") {
-            return reply("❌ Gagal cek nomor. Coba lagi nanti.");
-        }
+        if (err.message !== "timeout") return reply("❌ Gagal cek nomor. Coba lagi nanti.");
     }
 
     const targetJid = `${nomorBersih}@s.whatsapp.net`;
-    const timestamp = new Date().toLocaleString("id-ID", {
-        timeZone: "Asia/Jakarta",
-        hour12: false,
-    });
-
-    const pesanMenfess =
-        `╔══════════════════════╗\n` +
-        `║   📨 *MENFESS*       ║\n` +
-        `╚══════════════════════╝\n\n` +
-        `${pesan}\n\n` +
-        `──────────────────────\n` +
-        `🕐 ${timestamp}\n` +
-        `👤 _Anonim_\n\n` +
-        `_Balas pesan ini untuk merespon (tetap anonim)._`;
+    const ts        = timestamp();
+    const pesanFull = buildPesan(pesan, ts);
 
     try {
-        await sock.sendMessage(targetJid, { text: pesanMenfess });
-        return reply(`✅ Menfess berhasil dikirim ke *${nomorBersih}* secara anonim!`);
+        const sentMsg = await sock.sendMessage(targetJid, { text: pesanFull });
+        const msgId   = sentMsg?.key?.id;
+
+        if (msgId) {
+            sessions.set(msgId, { targetJid: from });
+            setTimeout(() => sessions.delete(msgId), 24 * 60 * 60 * 1000);
+        }
+
+        await reply(`✅ Menfess berhasil dikirim ke *${nomorBersih}* secara anonim!`);
     } catch {
-        return reply(`❌ Gagal mengirim ke *${nomorBersih}*. Coba lagi nanti.`);
+        await reply(`❌ Gagal mengirim ke *${nomorBersih}*. Coba lagi nanti.`);
     }
 }
 
