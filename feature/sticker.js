@@ -29,6 +29,27 @@ const silentLogger = {
     trace: () => {}, fatal: () => {},
 };
 
+const WA_STICKER_LIMIT = 500 * 1024; // 500KB
+
+async function compressWebp(inputPath, outputPath, quality = 50) {
+    await run(
+        `ffmpeg -i "${inputPath}" ` +
+        `-vf "scale=512:512:force_original_aspect_ratio=increase,crop=512:512" ` +
+        `-vcodec libwebp -lossless 0 -q:v ${quality} ` +
+        `-preset drawing -loop 0 -an -vsync 0 "${outputPath}" -y`
+    );
+}
+
+async function makeSticker(inputPath, outputPath) {
+    // Coba kualitas 50 dulu, kalau masih gede turunkan terus
+    const qualities = [50, 35, 20, 10];
+    for (const q of qualities) {
+        await compressWebp(inputPath, outputPath, q);
+        const size = fs.statSync(outputPath).size;
+        if (size <= WA_STICKER_LIMIT) break;
+    }
+}
+
 async function handleSticker(ctx) {
     const { sock, msg, from, body } = ctx;
     const reply = (text) => sock.sendMessage(from, { text }, { quoted: msg });
@@ -77,25 +98,31 @@ async function handleSticker(ctx) {
                 const ext       = isSticker ? "webp" : "jpg";
                 const inputPath = path.join(dir, `input.${ext}`);
                 fs.writeFileSync(inputPath, buffer);
-
-                // crop=1 biar full screen tanpa garis hitam
-                await run(
-                    `ffmpeg -i "${inputPath}" ` +
-                    `-vf "scale=512:512:force_original_aspect_ratio=increase,crop=512:512" ` +
-                    `-vcodec libwebp -lossless 0 -q:v 80 ` +
-                    `-preset drawing -loop 0 -an -vsync 0 "${outputPath}" -y`
-                );
+                await makeSticker(inputPath, outputPath);
 
             } else if (isVideo) {
-                const inputPath = path.join(dir, "input.mp4");
+                const inputPath  = path.join(dir, "input.mp4");
+                const tmpWebp    = path.join(dir, "tmp.webp");
                 fs.writeFileSync(inputPath, buffer);
 
-                await run(
-                    `ffmpeg -i "${inputPath}" ` +
-                    `-vf "scale=512:512:force_original_aspect_ratio=increase,crop=512:512,fps=15" ` +
-                    `-vcodec libwebp -lossless 0 -compression_level 6 -q:v 50 ` +
-                    `-loop 0 -preset picture -an -t 10 -vsync 0 "${outputPath}" -y`
-                );
+                // Video → WebP animasi, compress bertahap
+                const qualities = [50, 35, 20];
+                for (const q of qualities) {
+                    await run(
+                        `ffmpeg -i "${inputPath}" ` +
+                        `-vf "scale=512:512:force_original_aspect_ratio=increase,crop=512:512,fps=10" ` +
+                        `-vcodec libwebp -lossless 0 -compression_level 6 -q:v ${q} ` +
+                        `-loop 0 -preset picture -an -t 8 -vsync 0 "${tmpWebp}" -y`
+                    );
+                    const size = fs.statSync(tmpWebp).size;
+                    if (size <= WA_STICKER_LIMIT) break;
+                }
+                fs.copyFileSync(tmpWebp, outputPath);
+            }
+
+            const finalSize = fs.statSync(outputPath).size;
+            if (finalSize > WA_STICKER_LIMIT) {
+                return reply("❌ Gambar terlalu kompleks untuk dijadikan stiker. Coba gambar yang lebih sederhana.");
             }
 
             await sock.sendMessage(from, { sticker: fs.readFileSync(outputPath) }, { quoted: msg });
