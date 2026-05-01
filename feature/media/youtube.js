@@ -4,9 +4,13 @@ const path     = require("path");
 const os       = require("os");
 const cfg      = require("../../config");
 
+// Cari path node otomatis untuk --js-runtimes
+const NODE_PATH = process.execPath;
+const YT_FLAGS  = `--js-runtimes node:${NODE_PATH} --no-check-certificate --no-playlist`;
+
 const run = (cmd) =>
     new Promise((resolve, reject) =>
-        exec(cmd, { maxBuffer: 1024 * 1024 * 50 }, (err, stdout, stderr) =>
+        exec(cmd, { maxBuffer: 1024 * 1024 * 100 }, (err, stdout, stderr) =>
             err ? reject(stderr || err.message) : resolve(stdout.trim())
         )
     );
@@ -22,14 +26,13 @@ const cleanup = (dir) => {
 };
 
 function isYtUrl(url) {
-    return /(?:youtube\.com\/watch|youtu\.be\/)/.test(url);
+    return /(?:youtube\.com\/watch|youtu\.be\/|youtube\.com\/shorts\/)/.test(url);
 }
 
 async function handleYoutube(ctx) {
     const { sock, msg, from, command, text } = ctx;
     const reply = (t) => sock.sendMessage(from, { text: t }, { quoted: msg });
-
-    const p = cfg.PREFIX;
+    const p     = cfg.PREFIX;
 
     if (command === `${p}ytmp3`) {
         if (!text) return reply(`❌ Masukkan URL YouTube!\nContoh: ${p}ytmp3 https://youtu.be/xxxx`);
@@ -39,27 +42,28 @@ async function handleYoutube(ctx) {
         const dir = tmpDir();
 
         try {
-            await run(`yt-dlp -x --audio-format mp3 --audio-quality 0 -o "${dir}/%(title)s.%(ext)s" "${text}"`);
+            await run(
+                `yt-dlp ${YT_FLAGS} -x --audio-format mp3 --audio-quality 0 ` +
+                `-o "${dir}/%(title)s.%(ext)s" "${text}"`
+            );
+
             const files = fs.readdirSync(dir).filter(f => f.endsWith(".mp3"));
-            if (!files.length) throw new Error("File tidak ditemukan");
+            if (!files.length) throw new Error("File tidak ditemukan setelah download.");
 
             const filePath = path.join(dir, files[0]);
-            const title    = files[0].replace(".mp3", "");
-            const stat     = fs.statSync(filePath);
-
-            if (stat.size > 64 * 1024 * 1024) {
+            if (fs.statSync(filePath).size > 64 * 1024 * 1024) {
                 return reply("❌ File terlalu besar (max 64MB).");
             }
 
             await sock.sendMessage(from, {
-                audio    : fs.readFileSync(filePath),
-                mimetype : "audio/mpeg",
-                fileName : files[0],
-                ptt      : false,
+                audio   : fs.readFileSync(filePath),
+                mimetype: "audio/mpeg",
+                fileName: files[0],
+                ptt     : false,
             }, { quoted: msg });
 
         } catch (err) {
-            await reply(`❌ Gagal unduh: ${err.message || err}\n\nPastikan *yt-dlp* sudah terinstall:\n\`pip install yt-dlp\``);
+            await reply(`❌ Gagal unduh audio:\n${err.toString().split("\n").slice(0, 3).join("\n")}`);
         } finally {
             cleanup(dir);
         }
@@ -74,25 +78,29 @@ async function handleYoutube(ctx) {
         const dir = tmpDir();
 
         try {
-            await run(`yt-dlp -f "bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720][ext=mp4]/best[height<=720]" --merge-output-format mp4 -o "${dir}/%(title)s.%(ext)s" "${text}"`);
+            await run(
+                `yt-dlp ${YT_FLAGS} ` +
+                `-f "bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720][ext=mp4]/best[height<=720]" ` +
+                `--merge-output-format mp4 ` +
+                `-o "${dir}/%(title)s.%(ext)s" "${text}"`
+            );
+
             const files = fs.readdirSync(dir).filter(f => f.endsWith(".mp4"));
-            if (!files.length) throw new Error("File tidak ditemukan");
+            if (!files.length) throw new Error("File tidak ditemukan setelah download.");
 
             const filePath = path.join(dir, files[0]);
-            const stat     = fs.statSync(filePath);
-
-            if (stat.size > 64 * 1024 * 1024) {
+            if (fs.statSync(filePath).size > 64 * 1024 * 1024) {
                 return reply("❌ File terlalu besar (max 64MB). Coba video yang lebih pendek.");
             }
 
             await sock.sendMessage(from, {
-                video    : fs.readFileSync(filePath),
-                mimetype : "video/mp4",
-                caption  : `🎬 ${files[0].replace(".mp4", "")}`,
+                video   : fs.readFileSync(filePath),
+                mimetype: "video/mp4",
+                caption : `🎬 ${files[0].replace(".mp4", "")}`,
             }, { quoted: msg });
 
         } catch (err) {
-            await reply(`❌ Gagal unduh: ${err.message || err}\n\nPastikan *yt-dlp* & *ffmpeg* terinstall.`);
+            await reply(`❌ Gagal unduh video:\n${err.toString().split("\n").slice(0, 3).join("\n")}`);
         } finally {
             cleanup(dir);
         }
@@ -102,15 +110,15 @@ async function handleYoutube(ctx) {
     if (command === `${p}ytsearch`) {
         if (!text) return reply(`❌ Masukkan kata kunci!\nContoh: ${p}ytsearch alan walker faded`);
 
-        await reply("🔍 Mencari...");
+        await reply("🔍 Mencari di YouTube...");
 
         try {
-            const out = await run(`yt-dlp "ytsearch5:${text}" --get-title --get-id --no-playlist`);
-            const lines = out.split("\n").filter(Boolean);
-
-            if (!lines.length) return reply("❌ Tidak ada hasil ditemukan.");
-
+            const out   = await run(
+                `yt-dlp ${YT_FLAGS} "ytsearch5:${text}" --get-title --get-id`
+            );
+            const lines   = out.split("\n").filter(Boolean);
             const results = [];
+
             for (let i = 0; i < lines.length; i += 2) {
                 const title = lines[i];
                 const id    = lines[i + 1];
@@ -126,7 +134,7 @@ async function handleYoutube(ctx) {
             await reply(`🎵 *Hasil Pencarian YouTube*\n\n${txt}`);
 
         } catch (err) {
-            await reply(`❌ Gagal mencari: ${err.message || err}`);
+            await reply(`❌ Gagal mencari:\n${err.toString().split("\n").slice(0, 3).join("\n")}`);
         }
         return;
     }

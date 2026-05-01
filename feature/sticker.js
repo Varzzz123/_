@@ -78,21 +78,21 @@ async function handleSticker(ctx) {
                 const inputPath = path.join(dir, `input.${ext}`);
                 fs.writeFileSync(inputPath, buffer);
 
+                // crop=1 biar full screen tanpa garis hitam
                 await run(
                     `ffmpeg -i "${inputPath}" ` +
-                    `-vf "scale=512:512:force_original_aspect_ratio=decrease,` +
-                    `pad=512:512:(ow-iw)/2:(oh-ih)/2:color=0x00000000" ` +
-                    `-vcodec libwebp -lossless 1 -q:v 75 -preset default ` +
-                    `-loop 0 -an -vsync 0 "${outputPath}" -y`
+                    `-vf "scale=512:512:force_original_aspect_ratio=increase,crop=512:512" ` +
+                    `-vcodec libwebp -lossless 0 -q:v 80 ` +
+                    `-preset drawing -loop 0 -an -vsync 0 "${outputPath}" -y`
                 );
+
             } else if (isVideo) {
                 const inputPath = path.join(dir, "input.mp4");
                 fs.writeFileSync(inputPath, buffer);
 
                 await run(
                     `ffmpeg -i "${inputPath}" ` +
-                    `-vf "scale=512:512:force_original_aspect_ratio=decrease,` +
-                    `pad=512:512:(ow-iw)/2:(oh-ih)/2:color=0x00000000,fps=15" ` +
+                    `-vf "scale=512:512:force_original_aspect_ratio=increase,crop=512:512,fps=15" ` +
                     `-vcodec libwebp -lossless 0 -compression_level 6 -q:v 50 ` +
                     `-loop 0 -preset picture -an -t 10 -vsync 0 "${outputPath}" -y`
                 );
@@ -125,7 +125,7 @@ async function handleSticker(ctx) {
             await run(`ffmpeg -i "${inputPath}" "${outputPath}" -y`);
 
             await sock.sendMessage(from, {
-                image: fs.readFileSync(outputPath),
+                image  : fs.readFileSync(outputPath),
                 caption: "🖼️ Hasil convert",
             }, { quoted: msg });
 
