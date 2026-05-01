@@ -1,16 +1,16 @@
 const { exec } = require("child_process");
+const https    = require("https");
+const http     = require("http");
 const fs       = require("fs");
 const path     = require("path");
 const os       = require("os");
 const cfg      = require("../../config");
 
-// Cari path node otomatis untuk --js-runtimes
 const NODE_PATH = process.execPath;
-const YT_FLAGS  = `--js-runtimes node:${NODE_PATH} --no-check-certificate --no-playlist`;
 
 const run = (cmd) =>
     new Promise((resolve, reject) =>
-        exec(cmd, { maxBuffer: 1024 * 1024 * 100 }, (err, stdout, stderr) =>
+        exec(cmd, { maxBuffer: 1024 * 1024 * 200 }, (err, stdout, stderr) =>
             err ? reject(stderr || err.message) : resolve(stdout.trim())
         )
     );
@@ -29,6 +29,30 @@ function isYtUrl(url) {
     return /(?:youtube\.com\/watch|youtu\.be\/|youtube\.com\/shorts\/)/.test(url);
 }
 
+// Coba semua kombinasi flag yt-dlp sampai berhasil
+async function ytdlp(args, dir) {
+    const strategies = [
+        `--js-runtimes node:${NODE_PATH} --remote-components ejs:github`,
+        `--js-runtimes node:${NODE_PATH} --remote-components ejs:npm`,
+        `--js-runtimes node:${NODE_PATH}`,
+        `--extractor-args "youtube:player_client=android"`,
+        `--extractor-args "youtube:player_client=ios"`,
+        `--extractor-args "youtube:player_client=tv_embedded"`,
+    ];
+
+    let lastErr = "";
+    for (const flags of strategies) {
+        try {
+            const result = await run(`yt-dlp ${flags} --no-check-certificate --no-playlist ${args}`);
+            return result;
+        } catch (err) {
+            lastErr = err;
+            continue;
+        }
+    }
+    throw new Error(lastErr);
+}
+
 async function handleYoutube(ctx) {
     const { sock, msg, from, command, text } = ctx;
     const reply = (t) => sock.sendMessage(from, { text: t }, { quoted: msg });
@@ -42,13 +66,10 @@ async function handleYoutube(ctx) {
         const dir = tmpDir();
 
         try {
-            await run(
-                `yt-dlp ${YT_FLAGS} -x --audio-format mp3 --audio-quality 0 ` +
-                `-o "${dir}/%(title)s.%(ext)s" "${text}"`
-            );
+            await ytdlp(`-x --audio-format mp3 --audio-quality 0 -o "${dir}/%(title)s.%(ext)s" "${text}"`, dir);
 
             const files = fs.readdirSync(dir).filter(f => f.endsWith(".mp3"));
-            if (!files.length) throw new Error("File tidak ditemukan setelah download.");
+            if (!files.length) throw new Error("File tidak ditemukan.");
 
             const filePath = path.join(dir, files[0]);
             if (fs.statSync(filePath).size > 64 * 1024 * 1024) {
@@ -63,7 +84,7 @@ async function handleYoutube(ctx) {
             }, { quoted: msg });
 
         } catch (err) {
-            await reply(`❌ Gagal unduh audio:\n${err.toString().split("\n").slice(0, 3).join("\n")}`);
+            await reply(`❌ Gagal unduh audio. Coba lagi atau gunakan link lain.\n\n_${String(err).split("\n")[0]}_`);
         } finally {
             cleanup(dir);
         }
@@ -78,19 +99,18 @@ async function handleYoutube(ctx) {
         const dir = tmpDir();
 
         try {
-            await run(
-                `yt-dlp ${YT_FLAGS} ` +
-                `-f "bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720][ext=mp4]/best[height<=720]" ` +
-                `--merge-output-format mp4 ` +
-                `-o "${dir}/%(title)s.%(ext)s" "${text}"`
+            await ytdlp(
+                `-f "bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/best[height<=480]" ` +
+                `--merge-output-format mp4 -o "${dir}/%(title)s.%(ext)s" "${text}"`,
+                dir
             );
 
             const files = fs.readdirSync(dir).filter(f => f.endsWith(".mp4"));
-            if (!files.length) throw new Error("File tidak ditemukan setelah download.");
+            if (!files.length) throw new Error("File tidak ditemukan.");
 
             const filePath = path.join(dir, files[0]);
             if (fs.statSync(filePath).size > 64 * 1024 * 1024) {
-                return reply("❌ File terlalu besar (max 64MB). Coba video yang lebih pendek.");
+                return reply("❌ File terlalu besar (max 64MB). Coba video lebih pendek.");
             }
 
             await sock.sendMessage(from, {
@@ -100,7 +120,7 @@ async function handleYoutube(ctx) {
             }, { quoted: msg });
 
         } catch (err) {
-            await reply(`❌ Gagal unduh video:\n${err.toString().split("\n").slice(0, 3).join("\n")}`);
+            await reply(`❌ Gagal unduh video. Coba lagi atau gunakan link lain.\n\n_${String(err).split("\n")[0]}_`);
         } finally {
             cleanup(dir);
         }
@@ -113,10 +133,8 @@ async function handleYoutube(ctx) {
         await reply("🔍 Mencari di YouTube...");
 
         try {
-            const out   = await run(
-                `yt-dlp ${YT_FLAGS} "ytsearch5:${text}" --get-title --get-id`
-            );
-            const lines   = out.split("\n").filter(Boolean);
+            const out   = await ytdlp(`"ytsearch5:${text}" --get-title --get-id`, "");
+            const lines = out.split("\n").filter(Boolean);
             const results = [];
 
             for (let i = 0; i < lines.length; i += 2) {
@@ -134,7 +152,7 @@ async function handleYoutube(ctx) {
             await reply(`🎵 *Hasil Pencarian YouTube*\n\n${txt}`);
 
         } catch (err) {
-            await reply(`❌ Gagal mencari:\n${err.toString().split("\n").slice(0, 3).join("\n")}`);
+            await reply(`❌ Gagal mencari.\n\n_${String(err).split("\n")[0]}_`);
         }
         return;
     }
