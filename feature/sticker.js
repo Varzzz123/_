@@ -199,7 +199,6 @@ async function handleSticker(ctx) {
 
             fs.writeFileSync(inputPath, buffer);
 
-            // Coba convert, kalau gagal coba fallback
             try {
                 await run(`ffmpeg -i "${inputPath}" -vframes 1 "${outputPath}" -y`);
             } catch {
